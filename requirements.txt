@@ -1,5 +1,7 @@
 google-genai
 langchain-google-genai
+langgraph
+langgraph-checkpoint-postgres
 psycopg[binary]
 psycopg-pool
 pgvector
