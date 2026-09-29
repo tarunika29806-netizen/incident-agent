@@ -129,8 +129,10 @@ def search_remediation_runbooks(query: str) -> str:
 
     try:
         from pgvector.psycopg import register_vector
+        from pgvector import Vector
         with psycopg.connect(db_url) as conn:
             register_vector(conn)
+            query_vector = Vector(query_vector)
             with conn.cursor() as cur:
                 cur.execute(
                     "SELECT id, content, metadata, (1 - (embedding <=> %s))::FLOAT AS similarity "
@@ -192,7 +194,7 @@ SYSTEM_PROMPT = (
 def agent_node(state: AgentState):
     api_key = os.getenv("GEMINI_API_KEY", "mock-key")
     llm = ChatGoogleGenerativeAI(
-        model="gemini-1.5-flash",
+        model="gemini-3-flash-preview",
         google_api_key=api_key,
         temperature=0.2
     ).bind_tools(SAFE_TOOLS + SENSITIVE_TOOLS)
@@ -262,3 +264,7 @@ def get_agent_app(checkpointer=None, interrupt_before=None):
     workflow.add_edge("sensitive_tools", "agent")
 
     return workflow.compile(checkpointer=checkpointer, interrupt_before=interrupt_before)
+
+
+
+
