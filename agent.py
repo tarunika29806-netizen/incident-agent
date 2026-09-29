@@ -151,7 +151,29 @@ def search_remediation_runbooks(query: str) -> str:
         return json.dumps({"error": f"Database search query failed: {db_err}"})
 
 
+@tool
+def escalate_ticket(ticket_title: str, severity: str) -> str:
+    """[CRITICAL] Escalate an incident by creating a ticket and paging the on-call team.
+
+    This tool MUST NOT be called without explicit engineer approval.
+    It will be intercepted by the human-in-the-loop approval gate before execution.
+
+    Args:
+        ticket_title: Short description of the incident for the ticket title.
+        severity: Severity level (e.g. 'P1', 'P2', 'critical', 'high').
+    """
+    return json.dumps({
+        "ticket_id": "INC-0042",
+        "ticket_title": ticket_title,
+        "severity": severity,
+        "status": "created",
+        "oncall_paged": True,
+        "message": f"Escalation ticket '{ticket_title}' (severity={severity}) created and on-call team paged."
+    })
+
+
 SAFE_TOOLS = [query_service_health, search_remediation_runbooks]
+SENSITIVE_TOOLS = [escalate_ticket]
 
 SYSTEM_PROMPT = (
     "You are an Autonomous Incident Triage Agent. "
@@ -160,6 +182,9 @@ SYSTEM_PROMPT = (
     "2. Search remediation runbooks using `search_remediation_runbooks` for matching incident guidance.\n"
     "3. Synthesize your findings into a clear incident report detailing root cause, health metrics, "
     "and recommended remediation steps.\n"
+    "4. If manual intervention is required, or the service remains degraded after runbook review, "
+    "you MUST call `escalate_ticket` with an appropriate title and severity. "
+    "Escalation requires engineer approval before it executes - call it when warranted.\n"
     "Be concise, technical, and accurate."
 )
 
@@ -170,7 +195,7 @@ def agent_node(state: AgentState):
         model="gemini-1.5-flash",
         google_api_key=api_key,
         temperature=0.2
-    ).bind_tools(SAFE_TOOLS)
+    ).bind_tools(SAFE_TOOLS + SENSITIVE_TOOLS)
 
     messages = [SystemMessage(content=SYSTEM_PROMPT)] + list(state["messages"])
     response = llm.invoke(messages)
@@ -185,12 +210,21 @@ def agent_node(state: AgentState):
     }
 
 
-def route_next(state: AgentState):
+def route_tools(state: AgentState):
+    """Routes the last AI message to safe_tools, sensitive_tools, or END.
+
+    If ANY tool call in the message targets a sensitive tool, the entire message
+    is routed to sensitive_tools so no sensitive action can execute without approval.
+    """
     messages = state["messages"]
     last_message = messages[-1]
-    if hasattr(last_message, "tool_calls") and last_message.tool_calls:
-        return "safe_tools"
-    return END
+    if not (hasattr(last_message, "tool_calls") and last_message.tool_calls):
+        return END
+    sensitive_names = {t.name for t in SENSITIVE_TOOLS}
+    called_names = {tc["name"] for tc in last_message.tool_calls}
+    if called_names & sensitive_names:
+        return "sensitive_tools"
+    return "safe_tools"
 
 
 def create_connection_pool(db_url: str) -> ConnectionPool:
@@ -206,14 +240,25 @@ def create_connection_pool(db_url: str) -> ConnectionPool:
     )
 
 
-def get_agent_app(checkpointer=None):
-    """Compiles the LangGraph incident triage state machine."""
+def get_agent_app(checkpointer=None, interrupt_before=None):
+    """Compiles the LangGraph incident triage state machine.
+
+    Args:
+        checkpointer: LangGraph checkpointer (e.g. MemorySaver or PostgresSaver).
+        interrupt_before: List of node names to interrupt before. Defaults to
+            ["sensitive_tools"] to enable the HITL approval gate.
+    """
+    if interrupt_before is None:
+        interrupt_before = ["sensitive_tools"]
+
     workflow = StateGraph(AgentState)
     workflow.add_node("agent", agent_node)
     workflow.add_node("safe_tools", ToolNode(SAFE_TOOLS))
+    workflow.add_node("sensitive_tools", ToolNode(SENSITIVE_TOOLS))
 
     workflow.add_edge(START, "agent")
-    workflow.add_conditional_edges("agent", route_next, ["safe_tools", END])
+    workflow.add_conditional_edges("agent", route_tools, ["safe_tools", "sensitive_tools", END])
     workflow.add_edge("safe_tools", "agent")
+    workflow.add_edge("sensitive_tools", "agent")
 
-    return workflow.compile(checkpointer=checkpointer)
+    return workflow.compile(checkpointer=checkpointer, interrupt_before=interrupt_before)

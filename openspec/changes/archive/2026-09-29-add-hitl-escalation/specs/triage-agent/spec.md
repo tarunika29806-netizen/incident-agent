@@ -1,30 +1,6 @@
-# triage-agent Specification
+# Spec Delta
 
-## Purpose
-Executes autonomous incident investigation by diagnosing backend service health, searching vector runbooks, and synthesizing incident reports with recommended remediations.
-
-## Requirements
-
-### Requirement: Service Health Inspection Tool
-The agent SHALL provide a health check tool that accepts a target service name (`auth`, `database`, `payments`) and returns current service status, CPU/memory usage metrics, and error rates.
-
-#### Scenario: Healthy Service Inspection
-- **GIVEN** the target service is operational
-- **WHEN** the health check tool is called with service name `auth`
-- **THEN** it MUST return status `healthy` with normal CPU and memory metrics
-
-#### Scenario: Degraded Service Inspection
-- **GIVEN** a degraded backend condition (e.g. database high latency)
-- **WHEN** the health check tool is called with service name `database`
-- **THEN** it MUST return status `degraded` or `error` with latency or resource exhaustion metrics
-
-### Requirement: Runbook Retrieval Tool
-The agent SHALL provide a runbook retriever tool that queries the `incident_docs` table via `match_incident_docs` with query embedding vectors and returns matching runbook title, content, and similarity scores.
-
-#### Scenario: Relevant Runbook Retrieval
-- **GIVEN** an incident complaint regarding 504 timeouts on auth service
-- **WHEN** the runbook retriever tool is invoked
-- **THEN** it MUST return matching remediation steps from the seeded auth runbook
+## MODIFIED Requirements
 
 ### Requirement: Agent State Graph & Reasoning
 The agent SHALL orchestrate triage using a LangGraph state machine. It SHALL receive an
@@ -53,6 +29,8 @@ On approval, all pending sensitive tool calls MUST be executed. On rejection, a
 - **GIVEN** an AI message containing both a safe tool call and an `escalate_ticket` call
 - **WHEN** `route_tools` inspects the message
 - **THEN** it MUST route to `sensitive_tools` (not `safe_tools`), ensuring the sensitive call cannot execute without approval
+
+## ADDED Requirements
 
 ### Requirement: System prompt instructs escalation on degraded services
 The agent system prompt SHALL instruct the LLM to call `escalate_ticket` when manual
