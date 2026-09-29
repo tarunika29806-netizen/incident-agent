@@ -1,0 +1,8 @@
+google-genai
+langchain-google-genai
+psycopg[binary]
+psycopg-pool
+pgvector
+python-dotenv
+pytest
+pytest-mock
