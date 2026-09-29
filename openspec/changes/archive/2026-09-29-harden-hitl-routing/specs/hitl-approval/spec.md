@@ -1,22 +1,6 @@
-# hitl-approval Specification
+﻿# Spec Delta
 
-## Purpose
-Provides a human-in-the-loop approval gate that pauses the triage agent graph before any
-sensitive escalation action executes, requiring an engineer to explicitly approve or reject
-each escalation before it takes effect.
-
-## Requirements
-
-### Requirement: Escalation tool with CRITICAL marker
-The agent SHALL expose an `escalate_ticket(ticket_title, severity)` tool marked as a
-CRITICAL sensitive action. This tool SHALL create an incident ticket and notify the
-on-call team only after it has received engineer approval. It MUST NOT execute
-autonomously without passing through the human approval gate.
-
-#### Scenario: Tool registered as sensitive
-- **GIVEN** the compiled graph with HITL support
-- **WHEN** the list of sensitive tools is inspected
-- **THEN** `escalate_ticket` MUST appear in `SENSITIVE_TOOLS` and NOT in `SAFE_TOOLS`
+## MODIFIED Requirements
 
 ### Requirement: Graph pauses before sensitive tool execution
 

@@ -1,6 +1,7 @@
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
+from langchain_core.messages import AIMessage
 
 from app import app
 
@@ -125,3 +126,36 @@ def test_chat_validation():
     )
 
     assert response.status_code == 422
+
+
+def test_mixed_safe_and_sensitive_tools_require_approval():
+    message = AIMessage(
+        content="Checking service health and preparing escalation.",
+        tool_calls=[
+            {
+                "name": "query_service_health",
+                "args": {"service": "auth"},
+                "id": "safe-call-1",
+                "type": "tool_call",
+            },
+            {
+                "name": "escalate_ticket",
+                "args": {"summary": "Auth service is failing"},
+                "id": "sensitive-call-1",
+                "type": "tool_call",
+            },
+        ],
+    )
+
+    assert len(message.tool_calls) == 2
+
+    called_names = {
+        call["name"]
+        for call in message.tool_calls
+    }
+
+    sensitive_names = {
+        "escalate_ticket"
+    }
+
+    assert called_names & sensitive_names

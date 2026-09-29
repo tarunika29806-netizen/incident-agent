@@ -159,8 +159,8 @@ def triage(
     }
 
 
-def _pending_approval(thread_id: str):
-    """Return the pending sensitive tool call, if any."""
+def _pending_approvals(thread_id: str):
+    """Return all pending sensitive tool calls for a thread."""
     app = get_app()
     config = _config(thread_id)
 
@@ -172,7 +172,7 @@ def _pending_approval(thread_id: str):
     )
 
     if not messages:
-        return None
+        return []
 
     last_message = messages[-1]
 
@@ -182,19 +182,35 @@ def _pending_approval(thread_id: str):
         None
     ) or []
 
-    for call in tool_calls:
-        if call.get("name") == "escalate_ticket":
-            return call
+    sensitive_names = {
+        "escalate_ticket"
+    }
 
-    return None
+    return [
+        call
+        for call in tool_calls
+        if call.get("name") in sensitive_names
+    ]
+
+
+def _pending_approval(thread_id: str):
+    """Return the first pending sensitive tool call."""
+    pending = _pending_approvals(thread_id)
+
+    if not pending:
+        return None
+
+    return pending[0]
 
 
 def approve(thread_id: str) -> dict:
-    """Approve the pending sensitive action and resume the graph."""
+    """Approve all pending sensitive actions and resume the graph."""
     app = get_app()
     config = _config(thread_id)
 
-    if _pending_approval(thread_id) is None:
+    pending_calls = _pending_approvals(thread_id)
+
+    if not pending_calls:
         raise ValueError(
             "No pending approval for this thread"
         )
@@ -212,6 +228,14 @@ def approve(thread_id: str) -> dict:
         "status": "RESOLVED",
         "log": _agent_log(state),
         "state": state,
+        "approved_actions": [
+            {
+                "name": call.get("name"),
+                "id": call.get("id"),
+                "args": call.get("args", {}),
+            }
+            for call in pending_calls
+        ],
     }
 
 
@@ -220,36 +244,37 @@ def reject(
     reason: str
 ) -> dict:
     """
-    Reject the pending sensitive action.
+    Reject all pending sensitive actions.
 
-    The rejection is recorded in the checkpointed state.
-    We deliberately do NOT invoke the graph again because doing so
-    would send execution back to the LLM and could cause another
-    escalation attempt.
+    Every pending sensitive tool call receives a ToolMessage.
+    No sensitive tool is executed.
     """
     app = get_app()
     config = _config(thread_id)
 
-    pending_call = _pending_approval(
+    pending_calls = _pending_approvals(
         thread_id
     )
 
-    if pending_call is None:
+    if not pending_calls:
         raise ValueError(
             "No pending approval for this thread"
         )
 
-    rejection = ToolMessage(
-        content=f"Rejected by engineer: {reason}",
-        tool_call_id=pending_call["id"],
-    )
+    rejection_messages = []
+
+    for pending_call in pending_calls:
+        rejection_messages.append(
+            ToolMessage(
+                content=f"Rejected by engineer: {reason}",
+                tool_call_id=pending_call["id"],
+            )
+        )
 
     app.update_state(
         config,
         {
-            "messages": [
-                rejection
-            ],
+            "messages": rejection_messages,
             "requires_escalation": False,
         },
         as_node="sensitive_tools",
@@ -262,4 +287,12 @@ def reject(
         "status": "REJECTED_AND_RESUMED",
         "log": _agent_log(state),
         "state": state,
+        "rejected_actions": [
+            {
+                "name": call.get("name"),
+                "id": call.get("id"),
+                "args": call.get("args", {}),
+            }
+            for call in pending_calls
+        ],
     }
